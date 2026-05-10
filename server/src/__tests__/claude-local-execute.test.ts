@@ -779,6 +779,8 @@ describe("claude execute", () => {
         paperclipHome,
         "instances",
         "default",
+        "spaces",
+        "default",
         "companies",
         "company-1",
         "claude-prompt-cache",
