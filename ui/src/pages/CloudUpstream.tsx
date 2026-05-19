@@ -157,7 +157,7 @@ export function CloudUpstream() {
       setPreview(nextPreview);
       setActionError(null);
     },
-    onError: (error) => setActionError(error instanceof Error ? error.message : "Failed to preview push."),
+    onError: (error) => setActionError(previewErrorMessage(error)),
   });
 
   const runMutation = useMutation({
@@ -267,15 +267,18 @@ export function CloudUpstream() {
                   Schema {connection.target.schemaMajor}. Max chunk {formatBytes(connection.target.maxChunkBytes)}.
                 </div>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => previewMutation.mutate(connection.id)}
-                disabled={previewMutation.isPending || connection.tokenStatus !== "connected"}
-              >
-                {previewMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-                Preview push
-              </Button>
+              <div className="flex flex-col items-end gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => previewMutation.mutate(connection.id)}
+                  disabled={previewMutation.isPending || connection.tokenStatus !== "connected"}
+                >
+                  {previewMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                  Preview push
+                </Button>
+                {previewMutation.isPending ? <PreviewProgressHint /> : null}
+              </div>
             </div>
           ) : (
             <div className="grid gap-3 md:grid-cols-[1fr_auto]">
@@ -402,6 +405,21 @@ export function CloudUpstream() {
       ) : null}
     </div>
   );
+}
+
+function PreviewProgressHint() {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const startedAt = Date.now();
+    const interval = window.setInterval(() => setElapsed(Math.round((Date.now() - startedAt) / 1000)), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+  const message = elapsed < 15
+    ? "Building manifest..."
+    : elapsed < 45
+      ? `Building manifest... ${elapsed}s. Large companies can take up to a minute.`
+      : `Still building manifest... ${elapsed}s. PAP-scale companies routinely take ~60s.`;
+  return <div className="text-xs text-muted-foreground">{message}</div>;
 }
 
 function Stepper({ activeStep }: { activeStep: CloudUpstreamStep }) {
@@ -600,4 +618,12 @@ function formatBytes(value: number) {
   if (value >= 1024 * 1024) return `${Math.round(value / (1024 * 1024))} MiB`;
   if (value >= 1024) return `${Math.round(value / 1024)} KiB`;
   return `${value} B`;
+}
+
+function previewErrorMessage(error: unknown): string {
+  const code = error instanceof Error ? error.message : null;
+  if (code === "payload_too_large" || code === "bad_request") {
+    return "Local company is too large to preview as a single request. Click Push to continue (the Push step uploads in chunks), or see the docs for chunked-preview options.";
+  }
+  return code ?? "Failed to preview push.";
 }
