@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Layout } from "./Layout";
@@ -27,6 +27,10 @@ const mockPluginSlots = vi.hoisted(() => ({
 }));
 const mockUsePluginSlots = vi.hoisted(() => vi.fn());
 const mockPluginSlotContexts = vi.hoisted(() => [] as Array<Record<string, unknown>>);
+const mockSidebarState = vi.hoisted(() => ({
+  sidebarOpen: true,
+  isMobile: false,
+}));
 let currentPathname = "/PAP/dashboard";
 
 vi.mock("@/lib/router", () => ({
@@ -161,10 +165,10 @@ vi.mock("../context/CompanyContext", () => ({
 
 vi.mock("../context/SidebarContext", () => ({
   useSidebar: () => ({
-    sidebarOpen: true,
+    sidebarOpen: mockSidebarState.sidebarOpen,
     setSidebarOpen: mockSetSidebarOpen,
     toggleSidebar: vi.fn(),
-    isMobile: false,
+    isMobile: mockSidebarState.isMobile,
   }),
 }));
 
@@ -201,6 +205,14 @@ vi.mock("../lib/main-content-focus", () => ({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+async function act(callback: () => void | Promise<void>) {
+  let result: void | Promise<void> = undefined;
+  flushSync(() => {
+    result = callback();
+  });
+  await result;
+}
+
 async function flushReact() {
   await act(async () => {
     await Promise.resolve();
@@ -229,6 +241,8 @@ describe("Layout", () => {
     });
     mockPluginSlots.slots = [];
     mockPluginSlotContexts.length = 0;
+    mockSidebarState.sidebarOpen = true;
+    mockSidebarState.isMobile = false;
   });
 
   afterEach(() => {
@@ -313,6 +327,40 @@ describe("Layout", () => {
     expect(container.textContent).not.toContain("Instance sidebar");
     expect(container.textContent).not.toContain("Main company nav");
     expect(container.textContent).not.toContain("Plugin route sidebar");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("renders a mobile company settings selector on company settings routes", async () => {
+    currentPathname = "/PAP/company/settings/secrets";
+    mockSidebarState.isMobile = true;
+    mockSidebarState.sidebarOpen = false;
+    const root = createRoot(container);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <Layout />
+        </QueryClientProvider>,
+      );
+    });
+    await flushReact();
+    await flushReact();
+
+    const selector = container.querySelector("select");
+    expect(selector).not.toBeNull();
+    expect(selector?.value).toBe("secrets");
+    expect(selector?.textContent).toContain("General");
+    expect(selector?.textContent).toContain("Environments");
+    expect(selector?.textContent).toContain("Cloud upstream");
+    expect(selector?.textContent).toContain("Access");
+    expect(selector?.textContent).toContain("Invites");
+    expect(selector?.textContent).toContain("Secrets");
 
     await act(async () => {
       root.unmount();
