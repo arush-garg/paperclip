@@ -103,6 +103,17 @@ import {
   modelProfiles as openCodeModelProfiles,
 } from "@paperclipai/adapter-opencode-local";
 import {
+  execute as ollamaExecute,
+  testEnvironment as ollamaTestEnvironment,
+  sessionCodec as ollamaSessionCodec,
+  listOllamaModels,
+} from "@paperclipai/adapter-ollama-local/server";
+import {
+  agentConfigurationDoc as ollamaAgentConfigurationDoc,
+  models as ollamaModels,
+  modelProfiles as ollamaModelProfiles,
+} from "@paperclipai/adapter-ollama-local";
+import {
   execute as openclawGatewayExecute,
   testEnvironment as openclawGatewayTestEnvironment,
 } from "@paperclipai/adapter-openclaw-gateway/server";
@@ -411,6 +422,24 @@ const openCodeLocalAdapter: ServerAdapterModule = {
   agentConfigurationDoc: openCodeAgentConfigurationDoc,
 };
 
+const ollamaLocalAdapter: ServerAdapterModule = {
+  type: "ollama_local",
+  execute: ollamaExecute,
+  testEnvironment: ollamaTestEnvironment,
+  sessionCodec: ollamaSessionCodec,
+  models: ollamaModels,
+  modelProfiles: ollamaModelProfiles,
+  sessionManagement: getAdapterSessionManagement("ollama_local") ?? undefined,
+  listModels: () => listOllamaModels(),
+  // The adapter runs entirely in-band over HTTP and posts comments using the
+  // run JWT itself, so it benefits from a local agent JWT but does not spawn
+  // a child CLI, has no instructions bundle, and does not materialize skills.
+  supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: false,
+  requiresMaterializedRuntimeSkills: false,
+  agentConfigurationDoc: ollamaAgentConfigurationDoc,
+};
+
 const piLocalAdapter: ServerAdapterModule = {
   type: "pi_local",
   execute: piExecute,
@@ -513,6 +542,7 @@ function registerBuiltInAdapters() {
     acpxLocalAdapter,
     claudeLocalAdapter,
     codexLocalAdapter,
+    ollamaLocalAdapter,
     openCodeLocalAdapter,
     piLocalAdapter,
     cursorCloudAdapter,
