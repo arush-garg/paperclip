@@ -14,6 +14,7 @@ import {
   preflightLowTrustWorkspaceIsolation,
   prioritizeProjectWorkspaceCandidatesForRun,
   parseSessionCompactionPolicy,
+  resolveWorkspaceAfterLowTrustPreflight,
   resolveRuntimeSessionParamsForWorkspace,
   stripHostWorkspaceProvisionForLowTrustSandbox,
   stripWorkspaceRuntimeFromExecutionRunConfig,
@@ -184,6 +185,57 @@ describe("preflightLowTrustWorkspaceIsolation", () => {
       },
       resolveSelectedEnvironmentDriver: async () => "sandbox",
     })).resolves.toBe("sandbox");
+  });
+});
+
+describe("resolveWorkspaceAfterLowTrustPreflight", () => {
+  it("fails non-sandbox low-trust runs before resolving workspaces", async () => {
+    let workspaceResolverReached = false;
+
+    await expect(resolveWorkspaceAfterLowTrustPreflight({
+      trustPreset: lowTrustResolution(),
+      isolatedWorkspacesEnabled: true,
+      effectiveExecutionWorkspaceMode: "isolated_workspace",
+      issue: {
+        companyId: "company-1",
+        id: "issue-1",
+        projectId: "project-1",
+      },
+      resolveSelectedEnvironmentDriver: async () => "local",
+      resolveWorkspace: async () => {
+        workspaceResolverReached = true;
+        return buildResolvedWorkspace();
+      },
+    })).rejects.toMatchObject({
+      status: 422,
+      details: expect.objectContaining({
+        code: "low_trust_requires_sandbox_environment",
+      }),
+    });
+
+    expect(workspaceResolverReached).toBe(false);
+  });
+
+  it("preserves standard-trust workspace resolution", async () => {
+    const workspace = buildResolvedWorkspace({ cwd: "/tmp/standard-workspace" });
+
+    await expect(resolveWorkspaceAfterLowTrustPreflight({
+      trustPreset: standardTrustResolution(),
+      isolatedWorkspacesEnabled: false,
+      effectiveExecutionWorkspaceMode: "shared_workspace",
+      issue: {
+        companyId: "company-1",
+        id: "issue-1",
+        projectId: "project-1",
+      },
+      resolveSelectedEnvironmentDriver: async () => {
+        throw new Error("standard trust should not inspect the environment driver");
+      },
+      resolveWorkspace: async () => workspace,
+    })).resolves.toEqual({
+      selectedEnvironmentDriver: null,
+      workspace,
+    });
   });
 });
 
