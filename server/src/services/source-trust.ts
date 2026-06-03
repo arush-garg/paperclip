@@ -69,6 +69,12 @@ export function buildLowTrustSourceTrust(input: {
   };
 }
 
+function readObject(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
 export function buildPromotedSourceTrust(input: {
   sourceIssueId: string;
   sourceArtifactKind: "comment" | "document" | "work_product" | "issue";
@@ -122,12 +128,25 @@ export async function resolveActorSourceTrustForIssue(input: {
       ? input.db
           .select({
             companyId: heartbeatRuns.companyId,
+            agentId: heartbeatRuns.agentId,
+            contextSnapshot: heartbeatRuns.contextSnapshot,
           })
           .from(heartbeatRuns)
           .where(and(eq(heartbeatRuns.id, input.actor.runId), eq(heartbeatRuns.companyId, input.issue.companyId)))
           .then((rows) => rows[0] ?? null)
       : Promise.resolve(null),
   ]);
+
+  if (input.actor.runId && (!run || run.agentId !== input.actor.agentId)) {
+    return buildLowTrustSourceTrust({
+      issueId: input.issue.id,
+      runId: input.actor.runId,
+      agentId: input.actor.agentId,
+    });
+  }
+
+  const runContext = readObject(run?.contextSnapshot);
+  const runExecutionPolicy = readObject(runContext?.executionPolicy);
 
   const resolution = resolveCoreTrustPreset({
     companyId: input.issue.companyId,
@@ -137,7 +156,12 @@ export async function resolveActorSourceTrustForIssue(input: {
       companyId: input.issue.companyId,
       executionPolicy: input.issue.executionPolicy,
     },
-    run,
+    run: run
+      ? {
+          companyId: run.companyId,
+          executionPolicy: runExecutionPolicy,
+        }
+      : null,
   });
 
   if (resolution.kind !== "low_trust_review") return null;

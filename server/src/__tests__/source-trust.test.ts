@@ -1,12 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { agents, companies, createDb, heartbeatRuns, issues } from "@paperclipai/db";
 import { LOW_TRUST_REVIEW_PRESET } from "@paperclipai/shared";
 import {
   LOW_TRUST_QUARANTINED_BODY,
   buildPromotedSourceTrust,
   isLowTrustQuarantined,
   redactQuarantinedBodyForHigherTrust,
+  resolveActorSourceTrustForIssue,
   sanitizeQuarantinedCommentForHigherTrust,
 } from "../services/source-trust.js";
+import {
+  getEmbeddedPostgresTestSupport,
+  startEmbeddedPostgresTestDatabase,
+} from "./helpers/embedded-postgres.js";
+
+const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
+const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
 
 const quarantinedSourceTrust = {
   preset: LOW_TRUST_REVIEW_PRESET,
@@ -77,5 +88,168 @@ describe("source trust quarantine helpers", () => {
       promotedAt: "2026-06-03T12:00:00.000Z",
     });
     expect(isLowTrustQuarantined(promoted)).toBe(false);
+  });
+});
+
+describeEmbeddedPostgres("resolveActorSourceTrustForIssue", () => {
+  let db!: ReturnType<typeof createDb>;
+  let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
+
+  beforeAll(async () => {
+    tempDb = await startEmbeddedPostgresTestDatabase("paperclip-source-trust-");
+    db = createDb(tempDb.connectionString);
+  }, 20_000);
+
+  afterEach(async () => {
+    await db.delete(heartbeatRuns);
+    await db.delete(issues);
+    await db.delete(agents);
+    await db.delete(companies);
+  });
+
+  afterAll(async () => {
+    await tempDb?.cleanup();
+  });
+
+  async function createCompany() {
+    return db
+      .insert(companies)
+      .values({
+        name: `Source trust ${randomUUID()}`,
+        issuePrefix: `ST${randomUUID().slice(0, 6).toUpperCase()}`,
+      })
+      .returning()
+      .then((rows) => rows[0]!);
+  }
+
+  async function createAgent(companyId: string) {
+    return db
+      .insert(agents)
+      .values({
+        companyId,
+        name: `Agent ${randomUUID()}`,
+        role: "engineer",
+        adapterType: "process",
+        adapterConfig: {},
+        runtimeConfig: {},
+        permissions: {},
+      })
+      .returning()
+      .then((rows) => rows[0]!);
+  }
+
+  function lowTrustExecutionPolicy(companyId: string, rootIssueId: string) {
+    return {
+      authorizationPolicy: {
+        trustBoundary: {
+          mode: LOW_TRUST_REVIEW_PRESET,
+          companyId,
+          rootIssueId,
+        },
+      },
+    };
+  }
+
+  it("uses the heartbeat run execution-policy snapshot after live issue policy changes", async () => {
+    const company = await createCompany();
+    const agent = await createAgent(company.id);
+    const [issue] = await db
+      .insert(issues)
+      .values({
+        companyId: company.id,
+        title: "Run-scoped low-trust issue",
+        status: "in_progress",
+        priority: "high",
+        assigneeAgentId: agent.id,
+      })
+      .returning();
+    const executionPolicy = lowTrustExecutionPolicy(company.id, issue!.id);
+    const [run] = await db
+      .insert(heartbeatRuns)
+      .values({
+        companyId: company.id,
+        agentId: agent.id,
+        status: "running",
+        contextSnapshot: {
+          issueId: issue!.id,
+          executionPolicy,
+        },
+      })
+      .returning();
+
+    await db.update(issues).set({ executionPolicy: null }).where(eq(issues.id, issue!.id));
+
+    const sourceTrust = await resolveActorSourceTrustForIssue({
+      db,
+      issue: {
+        id: issue!.id,
+        companyId: company.id,
+        projectId: null,
+        executionPolicy: null,
+      },
+      actor: {
+        actorType: "agent",
+        actorId: agent.id,
+        agentId: agent.id,
+        runId: run!.id,
+      },
+    });
+
+    expect(sourceTrust).toMatchObject({
+      preset: LOW_TRUST_REVIEW_PRESET,
+      disposition: "quarantined",
+      sourceIssueId: issue!.id,
+      sourceRunId: run!.id,
+      sourceAgentId: agent.id,
+    });
+  });
+
+  it("fails closed when the supplied run id does not belong to the acting agent", async () => {
+    const company = await createCompany();
+    const actorAgent = await createAgent(company.id);
+    const runOwnerAgent = await createAgent(company.id);
+    const [issue] = await db
+      .insert(issues)
+      .values({
+        companyId: company.id,
+        title: "Standard issue",
+        status: "in_progress",
+        priority: "high",
+        assigneeAgentId: actorAgent.id,
+      })
+      .returning();
+    const [run] = await db
+      .insert(heartbeatRuns)
+      .values({
+        companyId: company.id,
+        agentId: runOwnerAgent.id,
+        status: "running",
+        contextSnapshot: { issueId: issue!.id },
+      })
+      .returning();
+
+    const sourceTrust = await resolveActorSourceTrustForIssue({
+      db,
+      issue: {
+        id: issue!.id,
+        companyId: company.id,
+        projectId: null,
+        executionPolicy: null,
+      },
+      actor: {
+        actorType: "agent",
+        actorId: actorAgent.id,
+        agentId: actorAgent.id,
+        runId: run!.id,
+      },
+    });
+
+    expect(sourceTrust).toMatchObject({
+      preset: LOW_TRUST_REVIEW_PRESET,
+      disposition: "quarantined",
+      sourceIssueId: issue!.id,
+      sourceRunId: run!.id,
+      sourceAgentId: actorAgent.id,
+    });
   });
 });

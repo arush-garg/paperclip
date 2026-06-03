@@ -3559,6 +3559,9 @@ export function issueRoutes(
       return;
     }
     assertCompanyAccess(req, issue.companyId);
+    if (!(await assertIssueReadAllowed(req, res, issue))) return;
+    if (!(await assertAgentIssueMutationAllowed(req, res, issue))) return;
+    if (!(await assertDeliverableMutationAllowedByRunContext(req, res, issue))) return;
     const actor = getActorInfo(req);
     if (await sourceTrustForActorWrite(issue, actor)) {
       res.status(403).json({ error: "Low-trust actors cannot promote quarantined output" });

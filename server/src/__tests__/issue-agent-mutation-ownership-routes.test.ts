@@ -194,26 +194,43 @@ function makeAgent(id: string, overrides: Record<string, unknown> = {}) {
   };
 }
 
-function createRunContextDb(contextSnapshot: Record<string, unknown> = {}) {
+function createRunContextDb(
+  contextSnapshot: Record<string, unknown> = {},
+  runAgentId: string = ownerAgentId,
+  runId: string = ownerRunId,
+) {
   return {
     transaction: async (callback: (tx: Record<string, never>) => Promise<unknown>) => callback({}),
-    select: vi.fn(() => ({
+    select: vi.fn((selection: Record<string, unknown> = {}) => ({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
-          then: async (resolve: (rows: unknown[]) => unknown) =>
-            resolve([{
-              id: ownerRunId,
-              companyId,
-              agentId: ownerAgentId,
-              contextSnapshot,
-            }]),
+          then: async (resolve: (rows: unknown[]) => unknown) => {
+            const keys = Object.keys(selection);
+            if (keys.includes("contextSnapshot")) {
+              return resolve([{
+                id: runId,
+                companyId,
+                agentId: runAgentId,
+                contextSnapshot,
+              }]);
+            }
+            if (keys.includes("permissions")) {
+              return resolve([{ id: runAgentId, companyId, permissions: {}, role: "engineer", reportsTo: null }]);
+            }
+            return resolve([{ id: runAgentId, companyId, permissions: {}, role: "engineer", reportsTo: null }]);
+          },
         })),
       })),
     })),
   };
 }
 
-async function createApp(actor: Record<string, unknown>, db: unknown = createRunContextDb()) {
+async function createApp(actor: Record<string, unknown>, db?: unknown) {
+  const routeDb = db ?? createRunContextDb(
+    {},
+    typeof actor.agentId === "string" ? actor.agentId : ownerAgentId,
+    typeof actor.runId === "string" ? actor.runId : ownerRunId,
+  );
   const [{ errorHandler }, { issueRoutes }] = await Promise.all([
     vi.importActual<typeof import("../middleware/index.js")>("../middleware/index.js"),
     vi.importActual<typeof import("../routes/issues.js")>("../routes/issues.js"),
@@ -224,7 +241,7 @@ async function createApp(actor: Record<string, unknown>, db: unknown = createRun
     (req as any).actor = actor;
     next();
   });
-  app.use("/api", issueRoutes(db as any, mockStorageService as any));
+  app.use("/api", issueRoutes(routeDb as any, mockStorageService as any));
   app.use(errorHandler);
   return app;
 }
@@ -280,10 +297,26 @@ describe("agent issue mutation checkout ownership", () => {
     mockAccessService.canUser.mockReset();
     mockAccessService.decide.mockReset();
     mockAccessService.decide.mockImplementation(async (input: { action: string }) => ({
-      allowed: input.action === "tasks:assign",
+      allowed:
+        input.action === "tasks:assign" ||
+        input.action === "issue:read" ||
+        input.action === "issue:mutate" ||
+        input.action === "company_scope:read",
       action: input.action,
-      reason: input.action === "tasks:assign" ? "allow_explicit_grant" : "deny_missing_grant",
-      explanation: input.action === "tasks:assign" ? "Allowed by test assignment default." : "Missing permission.",
+      reason:
+        input.action === "tasks:assign" ||
+          input.action === "issue:read" ||
+          input.action === "issue:mutate" ||
+          input.action === "company_scope:read"
+          ? "allow_explicit_grant"
+          : "deny_missing_grant",
+      explanation:
+        input.action === "tasks:assign" ||
+          input.action === "issue:read" ||
+          input.action === "issue:mutate" ||
+          input.action === "company_scope:read"
+          ? "Allowed by test default."
+          : "Missing permission.",
     }));
     mockAccessService.hasPermission.mockReset();
     mockAgentService.getById.mockReset();
@@ -487,6 +520,16 @@ describe("agent issue mutation checkout ownership", () => {
     ],
     ["work product update", (app: express.Express) => request(app).patch("/api/work-products/product-1").send({ title: "Blocked" })],
     [
+      "low-trust promotion",
+      (app: express.Express) =>
+        request(app).post(`/api/issues/${issueId}/low-trust/promotions`).send({
+          sourceArtifactKind: "comment",
+          sourceArtifactId: recoveryActionId,
+          title: "Promoted artifact",
+          summary: "Sanitized output",
+        }),
+    ],
+    [
       "attachment upload",
       (app: express.Express) =>
         request(app)
@@ -503,6 +546,7 @@ describe("agent issue mutation checkout ownership", () => {
     expect(mockIssueService.update).not.toHaveBeenCalled();
     expect(mockIssueService.addComment).not.toHaveBeenCalled();
     expect(mockDocumentService.upsertIssueDocument).not.toHaveBeenCalled();
+    expect(mockWorkProductService.createForIssue).not.toHaveBeenCalled();
     expect(mockWorkProductService.update).not.toHaveBeenCalled();
     expect(mockStorageService.putFile).not.toHaveBeenCalled();
     expect(mockStorageService.deleteObject).not.toHaveBeenCalled();
@@ -542,6 +586,16 @@ describe("agent issue mutation checkout ownership", () => {
     ],
     ["work product update", (app: express.Express) => request(app).patch("/api/work-products/product-1").send({ title: "Blocked" })],
     ["work product delete", (app: express.Express) => request(app).delete("/api/work-products/product-1")],
+    [
+      "low-trust promotion",
+      (app: express.Express) =>
+        request(app).post(`/api/issues/${issueId}/low-trust/promotions`).send({
+          sourceArtifactKind: "comment",
+          sourceArtifactId: recoveryActionId,
+          title: "Promoted artifact",
+          summary: "Sanitized output",
+        }),
+    ],
     [
       "attachment upload",
       (app: express.Express) =>
@@ -693,10 +747,18 @@ describe("agent issue mutation checkout ownership", () => {
 
   it("allows agents with the active-checkout management grant to mutate active checkouts", async () => {
     mockAccessService.decide.mockImplementation(async (input: { action: string }) => ({
-      allowed: input.action === "tasks:manage_active_checkouts",
+      allowed: input.action === "issue:mutate" || input.action === "tasks:manage_active_checkouts",
       action: input.action,
-      reason: input.action === "tasks:manage_active_checkouts" ? "allow_explicit_grant" : "deny_missing_grant",
-      explanation: input.action === "tasks:manage_active_checkouts" ? "Allowed by checkout management grant." : "Missing permission.",
+      reason:
+        input.action === "issue:mutate" || input.action === "tasks:manage_active_checkouts"
+          ? "allow_explicit_grant"
+          : "deny_missing_grant",
+      explanation:
+        input.action === "tasks:manage_active_checkouts"
+          ? "Allowed by checkout management grant."
+          : input.action === "issue:mutate"
+            ? "Allowed by test boundary default."
+            : "Missing permission.",
     }));
 
     const res = await request(await createApp(peerActor())).patch(`/api/issues/${issueId}`).send({ title: "Managed update" });
@@ -845,6 +907,15 @@ describe("agent issue mutation checkout ownership", () => {
       action: "tasks:assign",
       reason: "deny_policy_restricted",
       explanation: "Target agent requires approval before task assignment.",
+    }));
+    decide.mockImplementation(async (input: { action: string }) => ({
+      allowed: input.action === "issue:mutate",
+      action: input.action,
+      reason: input.action === "issue:mutate" ? "allow_self" : "deny_policy_restricted",
+      explanation:
+        input.action === "issue:mutate"
+          ? "Allowed because the actor owns the assigned issue."
+          : "Target agent requires approval before task assignment.",
     }));
     (mockAccessService as any).decide = decide;
     mockIssueService.getById.mockResolvedValue(makeIssue({ assigneeAgentId: ownerAgentId }));
