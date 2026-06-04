@@ -117,11 +117,6 @@ async function assertAgentCanManageRuntimeServicesForWorkspace(
     });
   }
 
-  if (actorAgent.role === "ceo") {
-    return;
-  }
-
-  const eligibleAgentIds = await listReportingSubtreeAgentIds(db, input.companyId, actorAgent.id);
   const workspaceScopeConditions = [
     input.projectWorkspaceId ? eq(issues.projectWorkspaceId, input.projectWorkspaceId) : null,
     input.executionWorkspaceId ? eq(issues.executionWorkspaceId, input.executionWorkspaceId) : null,
@@ -132,6 +127,40 @@ async function assertAgentCanManageRuntimeServicesForWorkspace(
     throw forbidden("Missing permission to manage workspace runtime services");
   }
 
+  const workspaceScopeCondition = workspaceScopeConditions.length === 1
+    ? workspaceScopeConditions[0]!
+    : or(...workspaceScopeConditions);
+
+  const linkedScopeIssues = await db
+    .select({
+      id: issues.id,
+      companyId: issues.companyId,
+      projectId: issues.projectId,
+      executionPolicy: issues.executionPolicy,
+      projectExecutionWorkspacePolicy: projects.executionWorkspacePolicy,
+    })
+    .from(issues)
+    .leftJoin(projects, and(eq(projects.id, issues.projectId), eq(projects.companyId, issues.companyId)))
+    .where(and(
+      eq(issues.companyId, input.companyId),
+      isNull(issues.hiddenAt),
+      inArray(issues.status, WORKSPACE_RUNTIME_ELIGIBLE_ISSUE_STATUSES),
+      workspaceScopeCondition,
+    ));
+
+  for (const linkedScopeIssue of linkedScopeIssues) {
+    assertLowTrustCanManageRuntimeForIssue({
+      actorAgent,
+      issue: linkedScopeIssue,
+      projectExecutionWorkspacePolicy: linkedScopeIssue.projectExecutionWorkspacePolicy,
+    });
+  }
+
+  if (actorAgent.role === "ceo") {
+    return;
+  }
+
+  const eligibleAgentIds = await listReportingSubtreeAgentIds(db, input.companyId, actorAgent.id);
   const linkedIssue = await db
     .select({
       id: issues.id,
@@ -147,9 +176,7 @@ async function assertAgentCanManageRuntimeServicesForWorkspace(
       isNull(issues.hiddenAt),
       inArray(issues.status, WORKSPACE_RUNTIME_ELIGIBLE_ISSUE_STATUSES),
       inArray(issues.assigneeAgentId, eligibleAgentIds),
-      workspaceScopeConditions.length === 1
-        ? workspaceScopeConditions[0]!
-        : or(...workspaceScopeConditions),
+      workspaceScopeCondition,
     ))
     .then((rows) => rows[0] ?? null);
 
