@@ -7,7 +7,7 @@
   Aim for 5–8 steps. See CONTRIBUTING.md for full examples.
 -->
 
-> - Paperclip orchestrates AI agents for zero-human companies
+> - Paperclip is the open source app people use to manage AI agents for work
 > - [Which subsystem or capability is involved]
 > - [What problem or gap exists]
 > - [Why it needs to be addressed]
@@ -60,9 +60,13 @@
 - [ ] I have included a thinking path that traces from project context to this change
 - [ ] I have specified the model used (with version and capability details)
 - [ ] I have checked ROADMAP.md and confirmed this PR does not duplicate planned core work
+- [ ] I have searched GitHub for duplicate or related PRs and linked them above
+- [ ] I have linked the GitHub issue this PR addresses (and any related/duplicate issues)
 - [ ] I have run tests locally and they pass
 - [ ] I have added or updated tests where applicable
 - [ ] If this change affects the UI, I have included before/after screenshots
 - [ ] I have updated relevant documentation to reflect my changes
 - [ ] I have considered and documented any risks above
+- [ ] All Paperclip CI gates are green
+- [ ] Greptile is 5/5 with no open P2s, recommendations, or follow-ups
 - [ ] I will address all Greptile and reviewer comments before requesting merge
