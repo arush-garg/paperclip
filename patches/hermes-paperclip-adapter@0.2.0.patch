@@ -1,0 +1,25 @@
+diff --git a/dist/server/execute.js b/dist/server/execute.js
+index 93cddf8243271f5fb3ab101617f9114257e41328..319f6bfa5b5df6b5ec18de48dc90cac2302883a0 100644
+--- a/dist/server/execute.js
++++ b/dist/server/execute.js
+@@ -257,7 +257,7 @@ export async function execute(ctx) {
+     const prompt = buildPrompt(ctx, config);
+     // ── Build command args ─────────────────────────────────────────────────
+     // Use -Q (quiet) to get clean output: just response + session_id line
+-    const useQuiet = cfgBoolean(config.quiet) !== false; // default true
++    const useQuiet = cfgBoolean(config.quiet) === true; // default false: emit decorated transcript lines so Paperclip renders tool cards
+     const args = ["chat", "-q", prompt];
+     if (useQuiet)
+         args.push("-Q");
+diff --git a/dist/shared/constants.js b/dist/shared/constants.js
+index b1d9995e53585c347e247facf187cc5be0e197a1..846945dd13ad972b9c7f448701270dab5a654d07 100644
+--- a/dist/shared/constants.js
++++ b/dist/shared/constants.js
+@@ -26,6 +26,7 @@ export const VALID_PROVIDERS = [
+     "kimi-coding",
+     "minimax",
+     "minimax-cn",
++    "nvidia",
+ ];
+ /** Regex to extract session ID from Hermes CLI output. */
+ export const SESSION_ID_REGEX = /session[_ ](?:id|saved)[:\s]+([a-zA-Z0-9_-]+)/i;
