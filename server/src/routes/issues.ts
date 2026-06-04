@@ -131,6 +131,7 @@ import {
   resolveActorSourceTrustForIssue,
   sanitizeQuarantinedCommentForHigherTrust,
 } from "../services/source-trust.js";
+import { resolveCoreTrustPreset } from "../services/trust-preset-resolver.js";
 
 const MAX_ISSUE_COMMENT_LIMIT = 500;
 const updateIssueRouteSchema = updateIssueSchema.extend({
@@ -979,6 +980,59 @@ export function issueRoutes(
     return resolveActorSourceTrustForIssue({ db, issue, actor });
   }
 
+  async function actorIsLowTrustReview(
+    req: Request,
+    companyId: string,
+    issue?: { companyId: string; executionPolicy?: unknown } | null,
+  ) {
+    if (req.actor.type !== "agent" || !req.actor.agentId) return false;
+    const [agent, run] = await Promise.all([
+      agentsSvc.getById(req.actor.agentId),
+      req.actor.runId
+        ? db
+            .select({
+              companyId: heartbeatRuns.companyId,
+              agentId: heartbeatRuns.agentId,
+              contextSnapshot: heartbeatRuns.contextSnapshot,
+            })
+            .from(heartbeatRuns)
+            .where(and(eq(heartbeatRuns.id, req.actor.runId), eq(heartbeatRuns.companyId, companyId)))
+            .then((rows) => rows[0] ?? null)
+        : Promise.resolve(null),
+    ]);
+    if (!agent || agent.companyId !== companyId) return false;
+    const runContext = run?.agentId === agent.id && run.contextSnapshot && typeof run.contextSnapshot === "object"
+      ? run.contextSnapshot as Record<string, unknown>
+      : null;
+    const runExecutionPolicy = runContext?.executionPolicy && typeof runContext.executionPolicy === "object"
+      ? runContext.executionPolicy as Record<string, unknown>
+      : null;
+    const resolution = resolveCoreTrustPreset({
+      companyId,
+      agent,
+      project: null,
+      issue: issue
+        ? {
+            companyId: issue.companyId,
+            executionPolicy: issue.executionPolicy,
+          }
+        : null,
+      run: runExecutionPolicy ? { companyId, executionPolicy: runExecutionPolicy } : null,
+    });
+    return resolution.kind !== "standard";
+  }
+
+  async function assertLowTrustControlPlaneDenied(
+    req: Request,
+    res: Response,
+    companyId: string,
+    issue?: { companyId: string; executionPolicy?: unknown } | null,
+  ) {
+    if (!(await actorIsLowTrustReview(req, companyId, issue))) return false;
+    res.status(403).json({ error: "Low-trust actors cannot use this control-plane surface" });
+    return true;
+  }
+
   async function shouldRedactLowTrustForHeartbeatContext(
     issue: { id: string; companyId: string; projectId?: string | null; executionPolicy?: unknown },
     actor: ReturnType<typeof getActorInfo>,
@@ -1816,6 +1870,8 @@ export function issueRoutes(
     res: Response,
     issue: { id: string; companyId: string; status: string; assigneeAgentId: string | null },
   ) {
+    if (await assertLowTrustControlPlaneDenied(req, res, issue.companyId, issue)) return false;
+
     if (issue.status === "cancelled") {
       res.status(409).json({
         error: "Cancelled issues must be restored through the dedicated restore flow",
@@ -3877,6 +3933,7 @@ export function issueRoutes(
       return;
     }
     assertCompanyAccess(req, issue.companyId);
+    if (await assertLowTrustControlPlaneDenied(req, res, issue.companyId, issue)) return;
     const approvals = await issueApprovalsSvc.listApprovalsForIssue(id);
     res.json(approvals);
   });
@@ -3947,6 +4004,7 @@ export function issueRoutes(
   router.post("/companies/:companyId/issues", applyCreateIssueStatusDefault, validate(createIssueSchema), async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
+    if (await assertLowTrustControlPlaneDenied(req, res, companyId, null)) return;
     assertNoAgentHostWorkspaceCommandMutation(req, collectIssueWorkspaceCommandPaths(req.body));
     if (req.actor.type === "agent" && !req.body.parentId) {
       const companyScopeDecision = await access.decide({
@@ -4081,6 +4139,7 @@ export function issueRoutes(
     }
     assertCompanyAccess(req, parent.companyId);
     if (!(await assertIssueReadAllowed(req, res, parent))) return;
+    if (await assertLowTrustControlPlaneDenied(req, res, parent.companyId, parent)) return;
     assertNoAgentHostWorkspaceCommandMutation(req, collectIssueWorkspaceCommandPaths(req.body));
     if (!(await assertCheapRecoveryIssueAssigneeProfileAllowed(req, res, parent, req.body))) return;
     if (req.body.assigneeAgentId || req.body.assigneeUserId) {
@@ -4415,6 +4474,14 @@ export function issueRoutes(
       existing.status !== "cancelled" && updateFields.status === "cancelled";
     if (resumeRequested === true && !commentBody) {
       res.status(400).json({ error: "Follow-up intent requires a comment" });
+      return;
+    }
+    if (
+      (reopenRequested === true ||
+        resumeRequested === true ||
+        Array.isArray(req.body.blockedByIssueIds)) &&
+      await assertLowTrustControlPlaneDenied(req, res, existing.companyId, existing)
+    ) {
       return;
     }
     if (resumeRequested === true && !(await assertExplicitResumeIntentAllowed(req, res, existing))) return;
@@ -5632,6 +5699,7 @@ export function issueRoutes(
     assertCompanyAccess(req, issue.companyId);
     if (req.actor.type === "agent") {
       if (!(await assertAgentIssueMutationAllowed(req, res, issue))) return;
+      if (await assertLowTrustControlPlaneDenied(req, res, issue.companyId, issue)) return;
     } else {
       assertBoard(req);
     }

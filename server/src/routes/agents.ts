@@ -25,6 +25,7 @@ import {
   wakeAgentSchema,
   updateAgentSchema,
   supportedEnvironmentDriversForAdapter,
+  LOW_TRUST_REVIEW_PRESET,
 } from "@paperclipai/shared";
 import {
   readPaperclipSkillSyncPreference,
@@ -99,6 +100,7 @@ import {
 import { getTelemetryClient } from "../telemetry.js";
 import { assertEnvironmentSelectionForCompany } from "./environment-selection.js";
 import { recoveryService } from "../services/recovery/service.js";
+import { resolveCoreTrustPreset } from "../services/trust-preset-resolver.js";
 
 const RUN_LOG_DEFAULT_LIMIT_BYTES = 256_000;
 const RUN_LOG_MAX_LIMIT_BYTES = 1024 * 1024;
@@ -560,6 +562,46 @@ export function agentRoutes(
       ...(options?.restricted ? redactForRestrictedAgentView(agent) : agent),
       chainOfCommand,
       access: accessState,
+    };
+  }
+
+  async function resolveAgentSelfTrustPreset(req: Request, agent: NonNullable<Awaited<ReturnType<typeof svc.getById>>>) {
+    const run = req.actor.type === "agent" && req.actor.runId
+      ? await db
+          .select({
+            companyId: heartbeatRuns.companyId,
+            agentId: heartbeatRuns.agentId,
+            contextSnapshot: heartbeatRuns.contextSnapshot,
+          })
+          .from(heartbeatRuns)
+          .where(and(eq(heartbeatRuns.id, req.actor.runId), eq(heartbeatRuns.companyId, agent.companyId)))
+          .then((rows) => rows[0] ?? null)
+      : null;
+    const runContext = run?.agentId === agent.id && run.contextSnapshot && typeof run.contextSnapshot === "object"
+      ? run.contextSnapshot as Record<string, unknown>
+      : null;
+    const runExecutionPolicy = runContext?.executionPolicy && typeof runContext.executionPolicy === "object"
+      ? runContext.executionPolicy as Record<string, unknown>
+      : null;
+
+    return resolveCoreTrustPreset({
+      companyId: agent.companyId,
+      agent,
+      project: null,
+      issue: null,
+      run: runExecutionPolicy ? { companyId: agent.companyId, executionPolicy: runExecutionPolicy } : null,
+    });
+  }
+
+  function buildLowTrustSelfView(agent: NonNullable<Awaited<ReturnType<typeof svc.getById>>>) {
+    return {
+      id: agent.id,
+      companyId: agent.companyId,
+      name: agent.name,
+      role: agent.role,
+      title: agent.title,
+      status: agent.status,
+      trustPreset: LOW_TRUST_REVIEW_PRESET,
     };
   }
 
@@ -1754,6 +1796,11 @@ export function agentRoutes(
     const agent = await svc.getById(req.actor.agentId);
     if (!agent) {
       res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    const trustPreset = await resolveAgentSelfTrustPreset(req, agent);
+    if (trustPreset.kind !== "standard") {
+      res.json(buildLowTrustSelfView(agent));
       return;
     }
     res.json(await buildAgentDetail(agent));
