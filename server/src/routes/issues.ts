@@ -130,7 +130,11 @@ import {
   resolveActorSourceTrustForIssue,
   sanitizeQuarantinedCommentForHigherTrust,
 } from "../services/source-trust.js";
-import { resolveCoreTrustPreset, type TrustPresetResolution } from "../services/trust-preset-resolver.js";
+import {
+  LOW_TRUST_ISSUE_ANCESTRY_MAX_DEPTH,
+  resolveCoreTrustPreset,
+  type TrustPresetResolution,
+} from "../services/trust-preset-resolver.js";
 
 const MAX_ISSUE_COMMENT_LIMIT = 500;
 const updateIssueRouteSchema = updateIssueSchema.extend({
@@ -1094,7 +1098,7 @@ export function issueRoutes(
       if (row.id !== input.issueId) {
         let cursor = row.parentId;
         let isDescendant = false;
-        for (let depth = 0; cursor && depth < 20; depth += 1) {
+        for (let depth = 0; cursor && depth < LOW_TRUST_ISSUE_ANCESTRY_MAX_DEPTH; depth += 1) {
           if (cursor === input.issueId) {
             isDescendant = true;
             break;
@@ -2377,43 +2381,7 @@ export function issueRoutes(
       return;
     }
 
-    const companyScopeDecision = await access.decide({
-      actor: req.actor,
-      action: "company_scope:read",
-      resource: { type: "company", companyId },
-    });
-    if (!companyScopeDecision.allowed) {
-      const rows = await svc.list(companyId, {
-        attention: "blocked",
-        status: req.query.status as string | undefined,
-        assigneeAgentId: req.query.assigneeAgentId as string | undefined,
-        participantAgentId: req.query.participantAgentId as string | undefined,
-        assigneeUserId: req.query.assigneeUserId as string | undefined,
-        projectId: req.query.projectId as string | undefined,
-        workspaceId: req.query.workspaceId as string | undefined,
-        executionWorkspaceId: req.query.executionWorkspaceId as string | undefined,
-        parentId: req.query.parentId as string | undefined,
-        descendantOf: req.query.descendantOf as string | undefined,
-        labelId: req.query.labelId as string | undefined,
-        originKind: req.query.originKind as string | undefined,
-        originKindPrefix: req.query.originKindPrefix as string | undefined,
-        originId: req.query.originId as string | undefined,
-        includeRoutineExecutions:
-          req.query.includeRoutineExecutions === "true" || req.query.includeRoutineExecutions === "1",
-        excludeRoutineExecutions:
-          req.query.excludeRoutineExecutions === "true" || req.query.excludeRoutineExecutions === "1",
-        includePluginOperations:
-          req.query.includePluginOperations === "true" || req.query.includePluginOperations === "1",
-        includeBlockedBy: true,
-        includeBlockedInboxAttention: true,
-        q: req.query.q as string | undefined,
-        limit: ISSUE_LIST_MAX_LIMIT,
-      });
-      res.json({ count: (await filterIssuesForActor(req, rows)).length });
-      return;
-    }
-
-    const count = await svc.count(companyId, {
+    const blockedCountFilters = {
       attention: "blocked",
       status: req.query.status as string | undefined,
       assigneeAgentId: req.query.assigneeAgentId as string | undefined,
@@ -2437,7 +2405,31 @@ export function issueRoutes(
       includeBlockedBy: true,
       includeBlockedInboxAttention: true,
       q: req.query.q as string | undefined,
+    } as const;
+
+    const companyScopeDecision = await access.decide({
+      actor: req.actor,
+      action: "company_scope:read",
+      resource: { type: "company", companyId },
     });
+    if (!companyScopeDecision.allowed) {
+      let offset = 0;
+      let visibleCount = 0;
+      while (true) {
+        const rows = await svc.list(companyId, {
+          ...blockedCountFilters,
+          limit: ISSUE_LIST_MAX_LIMIT,
+          offset,
+        });
+        visibleCount += (await filterIssuesForActor(req, rows)).length;
+        if (rows.length < ISSUE_LIST_MAX_LIMIT) break;
+        offset += rows.length;
+      }
+      res.json({ count: visibleCount });
+      return;
+    }
+
+    const count = await svc.count(companyId, blockedCountFilters);
     res.json({ count });
   });
 

@@ -3,10 +3,12 @@ import type { Db } from "@paperclipai/db";
 import { issues } from "@paperclipai/db";
 import { unprocessable } from "../errors.js";
 import type { TrustPresetResolution } from "./trust-preset-resolver.js";
-import { isIssueWithinLowTrustBoundary } from "./trust-preset-resolver.js";
+import {
+  LOW_TRUST_ISSUE_ANCESTRY_MAX_DEPTH,
+  isIssueWithinLowTrustBoundary,
+} from "./trust-preset-resolver.js";
 
 export const LOW_TRUST_RUNTIME_MANAGEMENT_TOOL_CLASS = "runtime.manage";
-const LOW_TRUST_ISSUE_ANCESTRY_MAX_DEPTH = 12;
 
 export function isLowTrustRuntimeManagementAllowed(resolution: TrustPresetResolution) {
   return resolution.kind === "low_trust_review" &&

@@ -12,6 +12,7 @@ import {
 import type { PermissionKey, PrincipalType } from "@paperclipai/shared";
 import { LOW_TRUST_REVIEW_PRESET, type LowTrustBoundary } from "@paperclipai/shared";
 import {
+  LOW_TRUST_ISSUE_ANCESTRY_MAX_DEPTH,
   isIssueWithinLowTrustBoundary,
   resolveCoreTrustPreset,
   type TrustPresetResolution,
@@ -183,7 +184,6 @@ type AssignmentPolicyEffect =
 
 type AgentHierarchyRow = { id: string; reportsTo: string | null };
 type LowTrustBoundaryWithCompany = LowTrustBoundary & { companyId: string };
-const LOW_TRUST_ISSUE_ANCESTRY_MAX_DEPTH = 12;
 type AgentAuthorizationRow = {
   id: string;
   companyId: string;

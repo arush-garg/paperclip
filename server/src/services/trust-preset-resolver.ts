@@ -11,6 +11,8 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
+export const LOW_TRUST_ISSUE_ANCESTRY_MAX_DEPTH = 12;
+
 export type TrustPresetPolicySource = "agent" | "project" | "issue" | "run";
 
 export type ResolveCoreTrustPresetInput = {
