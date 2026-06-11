@@ -27,6 +27,12 @@ export {
   type UpdateCompanyBranding,
 } from "./company.js";
 export {
+  setCompanyWorkspaceSchema,
+  selectDriveFolderSchema,
+  type SetCompanyWorkspace,
+  type SelectDriveFolder,
+} from "./company-workspace.js";
+export {
   environmentDriverSchema,
   environmentStatusSchema,
   environmentLeaseStatusSchema,

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, CloudUpload, KeyRound, MailPlus, MonitorCog, Puzzle, Settings, SlidersHorizontal, Users } from "lucide-react";
+import { ChevronLeft, CloudUpload, FolderOpen, KeyRound, MailPlus, MonitorCog, Puzzle, Settings, SlidersHorizontal, Users } from "lucide-react";
 import { sidebarBadgesApi } from "@/api/sidebarBadges";
 import { instanceSettingsApi } from "@/api/instanceSettings";
 import { ApiError } from "@/api/client";
@@ -70,6 +70,12 @@ export function CompanySettingsSidebar() {
             to="/company/settings/environments"
             label="Environments"
             icon={MonitorCog}
+            end
+          />
+          <SidebarNavItem
+            to="/company/settings/workspace"
+            label="Workspace"
+            icon={FolderOpen}
             end
           />
           {showCloudUpstream ? (

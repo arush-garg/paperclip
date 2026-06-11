@@ -687,6 +687,13 @@ export type {
   ProviderQuotaResult,
 } from "./types/index.js";
 export { COMPANY_SEARCH_SCOPES } from "./types/index.js";
+export type {
+  CompanyDriveConnection,
+  CompanyDriveConnectionStatus,
+  CompanyWorkspace,
+  DriveFolder,
+  DriveConnectStartResponse,
+} from "./types/company-workspace.js";
 export {
   ISSUE_REFERENCE_IDENTIFIER_RE,
   buildIssueReferenceHref,
@@ -792,6 +799,15 @@ export {
   type IssueGraphLivenessAutoRecoveryRequest,
 } from "./validators/index.js";
 
+export {
+  setCompanyWorkspaceSchema,
+  selectDriveFolderSchema,
+  setDriveFolderByUrlSchema,
+  parseDriveFolderUrl,
+  type SetCompanyWorkspace,
+  type SelectDriveFolder,
+  type SetDriveFolderByUrl,
+} from "./validators/company-workspace.js";
 export {
   createCompanySchema,
   updateCompanySchema,

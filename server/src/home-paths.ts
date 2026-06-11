@@ -64,6 +64,19 @@ function sanitizeFriendlyPathSegment(value: string | null | undefined, fallback 
   return sanitized || fallback;
 }
 
+export function resolveCompanyDriveWorkspaceDir(companyId: string): string {
+  const trimmed = companyId.trim();
+  if (!trimmed) {
+    throw new Error("Company drive workspace path requires a companyId.");
+  }
+  return path.resolve(
+    resolvePaperclipInstanceRoot(),
+    "company-workspaces",
+    sanitizeFriendlyPathSegment(trimmed, "company"),
+    "drive",
+  );
+}
+
 export function resolveManagedProjectWorkspaceDir(input: {
   companyId: string;
   projectId: string;

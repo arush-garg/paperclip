@@ -1,5 +1,6 @@
 import type {
   Company,
+  CompanyDriveConnection,
   CompanyPortabilityExportRequest,
   CompanyPortabilityExportPreviewResult,
   CompanyPortabilityExportResult,
@@ -7,8 +8,12 @@ import type {
   CompanyPortabilityImportResult,
   CompanyPortabilityPreviewRequest,
   CompanyPortabilityPreviewResult,
+  CompanyWorkspace,
+  DriveConnectStartResponse,
+  DriveFolder,
   UpdateCompanyBranding,
 } from "@paperclipai/shared";
+import type { SetCompanyWorkspace, SelectDriveFolder, SetDriveFolderByUrl } from "@paperclipai/shared";
 import { api } from "./client";
 
 export type CompanyStats = Record<string, { agentCount: number; issueCount: number }>;
@@ -58,4 +63,38 @@ export const companiesApi = {
     api.post<CompanyPortabilityPreviewResult>("/companies/import/preview", data),
   importBundle: (data: CompanyPortabilityImportRequest) =>
     api.post<CompanyPortabilityImportResult>("/companies/import", data),
+
+  // ── Company workspace ──────────────────────────────────────────────────────
+  getWorkspace: (companyId: string) =>
+    api.get<CompanyWorkspace | null>(`/companies/${companyId}/workspace`),
+  setWorkspace: (companyId: string, data: SetCompanyWorkspace) =>
+    api.put<CompanyWorkspace>(`/companies/${companyId}/workspace`, data),
+
+  // ── Google Drive ───────────────────────────────────────────────────────────
+  getDriveConnection: (companyId: string) =>
+    api.get<CompanyDriveConnection | null>(`/companies/${companyId}/drive/connection`),
+  uploadDriveCredentials: async (companyId: string, file: File) => {
+    const buffer = await file.arrayBuffer();
+    const safeFile = new File([buffer], file.name, { type: file.type });
+    const form = new FormData();
+    form.append("file", safeFile);
+    return api.postForm<CompanyDriveConnection>(`/companies/${companyId}/drive/credentials`, form);
+  },
+  startDriveConnect: (companyId: string) =>
+    api.post<DriveConnectStartResponse & { connectionId: string }>(`/companies/${companyId}/drive/connect`, {}),
+  finishDriveConnect: (companyId: string, data: { code: string; state: string }) =>
+    api.post<CompanyDriveConnection>(`/companies/${companyId}/drive/connect/finish`, data),
+  disconnectDrive: (companyId: string) =>
+    api.post<{ ok: true }>(`/companies/${companyId}/drive/disconnect`, {}),
+  listDriveFolders: (companyId: string, parentId?: string, search?: string) => {
+    const params = new URLSearchParams();
+    if (parentId) params.set("parentId", parentId);
+    if (search) params.set("search", search);
+    const qs = params.toString();
+    return api.get<DriveFolder[]>(`/companies/${companyId}/drive/folders${qs ? `?${qs}` : ""}`);
+  },
+  selectDriveFolder: (companyId: string, data: SelectDriveFolder) =>
+    api.post<CompanyDriveConnection>(`/companies/${companyId}/drive/folder`, data),
+  setDriveFolderByUrl: (companyId: string, data: SetDriveFolderByUrl) =>
+    api.post<{ folderId: string; folderName: string }>(`/companies/${companyId}/drive/folder-by-url`, data),
 };

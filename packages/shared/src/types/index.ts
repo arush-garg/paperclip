@@ -122,7 +122,14 @@ export type {
   DocumentTextRange,
   UpdateDocumentAnnotationThreadRequest,
 } from "./document-annotation.js";
-export type { Project, ProjectCodebase, ProjectCodebaseOrigin, ProjectGoalRef, ProjectManagedByPlugin, ProjectWorkspace } from "./project.js";
+export type { Project, ProjectCodebase, ProjectCodebaseOrigin, ProjectGoalRef, ProjectManagedByPlugin, ProjectWorkspace, ProjectWorkspaceSourceType } from "./project.js";
+export type {
+  CompanyDriveConnection,
+  CompanyDriveConnectionStatus,
+  CompanyWorkspace,
+  DriveFolder,
+  DriveConnectStartResponse,
+} from "./company-workspace.js";
 export type {
   CompanySearchHighlight,
   CompanySearchIssueSummary,

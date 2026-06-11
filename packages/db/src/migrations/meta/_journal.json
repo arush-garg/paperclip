@@ -666,6 +666,13 @@
       "when": 1780533900000,
       "tag": "0094_backfill_archived_company_agent_pauses",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1780800000000,
+      "tag": "0095_company_workspaces_and_drive",
+      "breakpoints": true
     }
   ]
 }

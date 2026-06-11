@@ -30,6 +30,8 @@ import {
   approvals,
   companySkills as companySkillsTable,
   companies,
+  companyDriveConnections,
+  companyWorkspaces,
   documentAnnotationComments,
   documentAnnotationThreads,
   documentRevisions,
@@ -1093,6 +1095,8 @@ export type ResolvedWorkspaceForRun = {
     repoRef: string | null;
   }>;
   warnings: string[];
+  googleDriveFolderId?: string | null;
+  googleDriveFolderName?: string | null;
 };
 
 type ProjectWorkspaceCandidate = {
@@ -3800,6 +3804,80 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         workspaceHints,
         warnings,
       };
+    }
+
+    // ── Company-level default workspace ────────────────────────────────────────
+    // Checked when the project has no workspace rows configured. Agents inherit
+    // the company default instead of getting an empty managed scratch dir.
+    const [companyWs] = await db
+      .select()
+      .from(companyWorkspaces)
+      .where(eq(companyWorkspaces.companyId, agent.companyId))
+      .limit(1);
+
+    if (companyWs?.sourceType === "google_drive") {
+      // Agents access Drive directly via Google Workspace MCP — no server-side
+      // file sync needed. The folder ID/name is surfaced in context so the
+      // agent knows which folder to work in.
+      const driveConnectionRows = companyWs.googleDriveConnectionId
+        ? await db
+            .select({ folderId: companyDriveConnections.folderId, folderName: companyDriveConnections.folderName })
+            .from(companyDriveConnections)
+            .where(eq(companyDriveConnections.id, companyWs.googleDriveConnectionId))
+            .limit(1)
+        : [];
+      const driveConn = driveConnectionRows[0] ?? null;
+      const managedWorkspace = await ensureManagedProjectWorkspace({
+        companyId: agent.companyId,
+        projectId: workspaceProjectId ?? resolvedProjectId ?? agent.companyId,
+        repoUrl: null,
+      });
+      return {
+        cwd: managedWorkspace.cwd,
+        source: "project_primary" as const,
+        projectId: resolvedProjectId,
+        workspaceId: null,
+        repoUrl: null,
+        repoRef: null,
+        workspaceHints,
+        warnings: managedWorkspace.warning ? [managedWorkspace.warning] : [],
+        googleDriveFolderId: driveConn?.folderId ?? null,
+        googleDriveFolderName: driveConn?.folderName ?? null,
+      };
+    } else if (companyWs?.sourceType === "local_path" && companyWs.cwd) {
+      const cwdExists = await fs.stat(companyWs.cwd).then((s) => s.isDirectory()).catch(() => false);
+      if (cwdExists) {
+        return {
+          cwd: companyWs.cwd,
+          source: "project_primary" as const,
+          projectId: resolvedProjectId,
+          workspaceId: null,
+          repoUrl: null,
+          repoRef: null,
+          workspaceHints,
+          warnings: [],
+        };
+      }
+    } else if (companyWs?.sourceType === "git_repo" && companyWs.repoUrl) {
+      try {
+        const managedWorkspace = await ensureManagedProjectWorkspace({
+          companyId: agent.companyId,
+          projectId: workspaceProjectId ?? resolvedProjectId ?? agent.companyId,
+          repoUrl: companyWs.repoUrl,
+        });
+        return {
+          cwd: managedWorkspace.cwd,
+          source: "project_primary" as const,
+          projectId: resolvedProjectId,
+          workspaceId: null,
+          repoUrl: companyWs.repoUrl,
+          repoRef: companyWs.repoRef,
+          workspaceHints,
+          warnings: managedWorkspace.warning ? [managedWorkspace.warning] : [],
+        };
+      } catch (err) {
+        logger.warn({ companyId: agent.companyId, err }, "Company git workspace clone failed; falling through to managed workspace");
+      }
     }
 
     if (workspaceProjectId) {
@@ -7724,6 +7802,10 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       })(),
     };
     context.paperclipWorkspaces = resolvedWorkspace.workspaceHints;
+    if (resolvedWorkspace.googleDriveFolderId) {
+      context.googleDriveFolderId = resolvedWorkspace.googleDriveFolderId;
+      context.googleDriveFolderName = resolvedWorkspace.googleDriveFolderName ?? null;
+    }
     const runtimeServiceIntents = (() => {
       const runtimeConfig = parseObject(resolvedConfig.workspaceRuntime);
       return Array.isArray(runtimeConfig.services)
